@@ -1,105 +1,120 @@
 import ast
 import typing
 from dataclasses import dataclass
-from pathlib import Path
 
 @dataclass
-class CodeIssue:
-    line_number: int
+class ReviewComment:
+    line: int
     message: str
-    severity: str  # 'error', 'warning', or 'info'
-    suggestion: str
+    severity: str  # 'high', 'medium', 'low'
 
 class CodeReviewer:
     def __init__(self):
-        self.issues: typing.List[CodeIssue] = []
+        self.review_rules = [
+            self._check_function_length,
+            self._check_complexity,
+            self._check_naming,
+            self._check_docstrings
+        ]
 
-    def review_file(self, filepath: Path) -> typing.List[CodeIssue]:
-        """Analyze a Python file for code quality issues"""
-        with open(filepath, 'r') as f:
-            content = f.read()
-        
+    def review_code(self, code: str) -> typing.List[ReviewComment]:
+        """Analyze Python code and return review comments."""
         try:
-            tree = ast.parse(content)
-            self._analyze_complexity(tree)
-            self._check_naming_conventions(tree)
-            self._detect_anti_patterns(tree)
-            return self.issues
+            tree = ast.parse(code)
         except SyntaxError as e:
-            self.issues.append(CodeIssue(
-                line_number=e.lineno or 0,
-                message=f'Syntax error: {str(e)}',
-                severity='error',
-                suggestion='Fix the syntax error to proceed with analysis'
-            ))
-            return self.issues
+            return [ReviewComment(e.lineno, f'Syntax error: {str(e)}', 'high')]
 
-    def _analyze_complexity(self, tree: ast.AST) -> None:
-        """Analyze code complexity metrics"""
+        comments = []
+        for rule in self.review_rules:
+            comments.extend(rule(tree))
+        return comments
+
+    def _check_function_length(self, tree: ast.AST) -> typing.List[ReviewComment]:
+        comments = []
         for node in ast.walk(tree):
             if isinstance(node, ast.FunctionDef):
-                # Check function length
-                if len(node.body) > 20:
-                    self.issues.append(CodeIssue(
-                        line_number=node.lineno,
-                        message=f'Function {node.name} is too long ({len(node.body)} lines)',
-                        severity='warning',
-                        suggestion='Consider breaking this function into smaller, more focused functions'
-                    ))
-                
-                # Check number of arguments
-                if len(node.args.args) > 5:
-                    self.issues.append(CodeIssue(
-                        line_number=node.lineno,
-                        message=f'Function {node.name} has too many parameters ({len(node.args.args)})',
-                        severity='warning',
-                        suggestion='Consider grouping related parameters into a class or data structure'
-                    ))
+                body_lines = len(node.body)
+                if body_lines > 20:
+                    comments.append(
+                        ReviewComment(
+                            node.lineno,
+                            f'Function {node.name} is {body_lines} lines long. Consider breaking it down.',
+                            'medium'
+                        )
+                    )
+        return comments
 
-    def _check_naming_conventions(self, tree: ast.AST) -> None:
-        """Check Python naming conventions"""
+    def _check_complexity(self, tree: ast.AST) -> typing.List[ReviewComment]:
+        comments = []
         for node in ast.walk(tree):
-            if isinstance(node, ast.ClassDef):
-                if not node.name[0].isupper():
-                    self.issues.append(CodeIssue(
-                        line_number=node.lineno,
-                        message=f'Class name {node.name} should use CapWords convention',
-                        severity='info',
-                        suggestion=f'Rename to {node.name[0].upper() + node.name[1:]}'
-                    ))
-            elif isinstance(node, ast.FunctionDef):
+            if isinstance(node, ast.FunctionDef):
+                nested_depth = 0
+                for child in ast.walk(node):
+                    if isinstance(child, (ast.For, ast.While, ast.If)):
+                        nested_depth += 1
+                if nested_depth > 3:
+                    comments.append(
+                        ReviewComment(
+                            node.lineno,
+                            f'Function {node.name} has high complexity with {nested_depth} nested blocks.',
+                            'high'
+                        )
+                    )
+        return comments
+
+    def _check_naming(self, tree: ast.AST) -> typing.List[ReviewComment]:
+        comments = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef):
                 if not node.name.islower():
-                    self.issues.append(CodeIssue(
-                        line_number=node.lineno,
-                        message=f'Function name {node.name} should use lowercase_with_underscores convention',
-                        severity='info',
-                        suggestion=f'Rename to {node.name.lower()}'
-                    ))
+                    comments.append(
+                        ReviewComment(
+                            node.lineno,
+                            f'Function {node.name} should use snake_case naming.',
+                            'low'
+                        )
+                    )
+            elif isinstance(node, ast.ClassDef):
+                if not node.name[0].isupper():
+                    comments.append(
+                        ReviewComment(
+                            node.lineno,
+                            f'Class {node.name} should use PascalCase naming.',
+                            'low'
+                        )
+                    )
+        return comments
 
-    def _detect_anti_patterns(self, tree: ast.AST) -> None:
-        """Detect common anti-patterns"""
+    def _check_docstrings(self, tree: ast.AST) -> typing.List[ReviewComment]:
+        comments = []
         for node in ast.walk(tree):
-            # Detect bare except clauses
-            if isinstance(node, ast.ExceptHandler) and node.type is None:
-                self.issues.append(CodeIssue(
-                    line_number=node.lineno,
-                    message='Bare except clause detected',
-                    severity='error',
-                    suggestion='Specify the exception types you want to catch'
-                ))
-            
-            # Detect mutable default arguments
-            if isinstance(node, ast.FunctionDef):
-                for default in node.args.defaults:
-                    if isinstance(default, (ast.List, ast.Dict, ast.Set)):
-                        self.issues.append(CodeIssue(
-                            line_number=node.lineno,
-                            message='Mutable default argument detected',
-                            severity='warning',
-                            suggestion='Use None as default and initialize mutable objects inside the function'
-                        ))
+            if isinstance(node, (ast.FunctionDef, ast.ClassDef)):
+                if not ast.get_docstring(node):
+                    comments.append(
+                        ReviewComment(
+                            node.lineno,
+                            f'Missing docstring for {node.name}.',
+                            'medium'
+                        )
+                    )
+        return comments
 
-def review_code(filepath: str) -> typing.List[CodeIssue]:
-    """Main entry point for code review"""
+def review_file(filepath: str) -> typing.List[ReviewComment]:
+    """Review a Python source file and return review comments."""
+    with open(filepath, 'r') as f:
+        code = f.read()
     reviewer = CodeReviewer()
-    return reviewer.review_file(Path(filepath))
+    return reviewer.review_code(code)
+
+def main():
+    import sys
+    if len(sys.argv) != 2:
+        print('Usage: python reviewer.py <file.py>')
+        sys.exit(1)
+    
+    comments = review_file(sys.argv[1])
+    for comment in comments:
+        print(f'Line {comment.line} - {comment.severity.upper()}: {comment.message}')
+
+if __name__ == '__main__':
+    main()
