@@ -1,108 +1,124 @@
+"""AI-powered code review automation with quality scoring."""
+
 import ast
-import typing
 from dataclasses import dataclass
-from pathlib import Path
+from typing import List, Dict
+import statistics
 
 @dataclass
 class CodeMetrics:
-    cyclomatic_complexity: int
-    cognitive_complexity: int
-    lines_of_code: int
-    num_functions: int
-    recommendations: list[str]
+    complexity: int
+    lines: int 
+    comments: int
+    functions: int
+    classes: int
+    score: float
+    suggestions: List[str]
 
 class CodeReviewer:
     def __init__(self):
-        self.complexity_threshold = 10
-
-    def analyze_file(self, file_path: Path) -> CodeMetrics:
-        """Analyzes a Python file and returns code quality metrics with recommendations."""
-        with open(file_path) as f:
-            content = f.read()
-        
-        tree = ast.parse(content)
-        metrics = self._calculate_metrics(tree)
-        recommendations = self._generate_recommendations(metrics)
-        
-        return CodeMetrics(
-            cyclomatic_complexity=metrics['cyclomatic'],
-            cognitive_complexity=metrics['cognitive'],
-            lines_of_code=metrics['loc'],
-            num_functions=metrics['functions'],
-            recommendations=recommendations
-        )
-    
-    def _calculate_metrics(self, tree: ast.AST) -> dict:
-        """Calculates various code complexity metrics from AST."""
-        metrics = {
-            'cyclomatic': 1,  # Base complexity of 1
-            'cognitive': 0,
-            'loc': len(tree.body),
-            'functions': 0
+        self.quality_thresholds = {
+            'complexity': {'good': 10, 'warning': 20},
+            'comments_ratio': {'good': 0.1, 'warning': 0.05},
+            'function_length': {'good': 20, 'warning': 40}
         }
+    
+    def analyze_code(self, code: str) -> CodeMetrics:
+        """Analyze code and return detailed metrics with quality score."""
+        tree = ast.parse(code)
         
-        for node in ast.walk(tree):
-            # Count control flow statements for cyclomatic complexity
-            if isinstance(node, (ast.If, ast.While, ast.For, ast.ExceptHandler)):
-                metrics['cyclomatic'] += 1
-            elif isinstance(node, ast.BoolOp):
-                metrics['cyclomatic'] += len(node.values) - 1
-                
-            # Count nested structures for cognitive complexity
-            if isinstance(node, (ast.If, ast.While, ast.For)):
-                metrics['cognitive'] += 1
-                
-            # Count function definitions
-            if isinstance(node, ast.FunctionDef):
-                metrics['functions'] += 1
-                
+        metrics = CodeMetrics(
+            complexity=self._calculate_complexity(tree),
+            lines=len(code.splitlines()),
+            comments=self._count_comments(code),
+            functions=len([n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)]),
+            classes=len([n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)]),
+            score=0.0,
+            suggestions=[]
+        )
+        
+        metrics.score = self._calculate_quality_score(metrics)
+        metrics.suggestions = self._generate_suggestions(metrics)
+        
         return metrics
     
-    def _generate_recommendations(self, metrics: dict) -> list[str]:
-        """Generates specific recommendations based on code metrics."""
-        recommendations = []
+    def _calculate_complexity(self, tree: ast.AST) -> int:
+        """Calculate cyclomatic complexity."""
+        complexity = 1
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.If, ast.While, ast.For, ast.ExceptHandler)):
+                complexity += 1
+            elif isinstance(node, ast.BoolOp):
+                complexity += len(node.values) - 1
+        return complexity
+    
+    def _count_comments(self, code: str) -> int:
+        """Count number of comment lines."""
+        return len([line for line in code.splitlines() 
+                   if line.strip().startswith('#') or line.strip().startswith('"""")])
+    
+    def _calculate_quality_score(self, metrics: CodeMetrics) -> float:
+        """Calculate overall code quality score (0-10)."""
+        scores = []
         
-        if metrics['cyclomatic'] > self.complexity_threshold:
-            recommendations.append(
-                f"High cyclomatic complexity ({metrics['cyclomatic']}). Consider breaking down complex functions."
-            )
+        # Complexity score
+        if metrics.complexity <= self.quality_thresholds['complexity']['good']:
+            scores.append(10)
+        elif metrics.complexity <= self.quality_thresholds['complexity']['warning']:
+            scores.append(7)
+        else:
+            scores.append(4)
+        
+        # Comments ratio score
+        comments_ratio = metrics.comments / metrics.lines if metrics.lines > 0 else 0
+        if comments_ratio >= self.quality_thresholds['comments_ratio']['good']:
+            scores.append(10)
+        elif comments_ratio >= self.quality_thresholds['comments_ratio']['warning']:
+            scores.append(7)
+        else:
+            scores.append(4)
+        
+        # Average function length score
+        avg_func_length = metrics.lines / metrics.functions if metrics.functions > 0 else metrics.lines
+        if avg_func_length <= self.quality_thresholds['function_length']['good']:
+            scores.append(10)
+        elif avg_func_length <= self.quality_thresholds['function_length']['warning']:
+            scores.append(7)
+        else:
+            scores.append(4)
             
-        if metrics['cognitive'] > self.complexity_threshold:
-            recommendations.append(
-                f"High cognitive complexity ({metrics['cognitive']}). Consider simplifying nested logic."
-            )
-            
-        if metrics['loc'] > 300:
-            recommendations.append(
-                "File is quite long. Consider splitting into multiple modules."
-            )
-            
-        if metrics['functions'] > 10:
-            recommendations.append(
-                "Large number of functions. Consider grouping related functions into separate classes/modules."
-            )
-            
-        return recommendations
+        return statistics.mean(scores)
+    
+    def _generate_suggestions(self, metrics: CodeMetrics) -> List[str]:
+        """Generate improvement suggestions based on metrics."""
+        suggestions = []
+        
+        if metrics.complexity > self.quality_thresholds['complexity']['warning']:
+            suggestions.append(
+                f'High complexity ({metrics.complexity}). Consider breaking down complex functions.')
+        
+        comments_ratio = metrics.comments / metrics.lines if metrics.lines > 0 else 0
+        if comments_ratio < self.quality_thresholds['comments_ratio']['warning']:
+            suggestions.append('Low comment density. Consider adding more documentation.')
+        
+        avg_func_length = metrics.lines / metrics.functions if metrics.functions > 0 else metrics.lines
+        if avg_func_length > self.quality_thresholds['function_length']['warning']:
+            suggestions.append(
+                f'Average function length ({avg_func_length:.1f} lines) is high. Consider breaking down large functions.')
+        
+        return suggestions
 
-    def review(self, file_path: Path) -> str:
-        """Main entry point for code review."""
-        try:
-            metrics = self.analyze_file(file_path)
-            
-            report = [f"Code Review Report for {file_path}\n"]
-            report.append(f"Lines of Code: {metrics.lines_of_code}")
-            report.append(f"Cyclomatic Complexity: {metrics.cyclomatic_complexity}")
-            report.append(f"Cognitive Complexity: {metrics.cognitive_complexity}")
-            report.append(f"Number of Functions: {metrics.num_functions}\n")
-            
-            if metrics.recommendations:
-                report.append("Recommendations:")
-                for i, rec in enumerate(metrics.recommendations, 1):
-                    report.append(f"{i}. {rec}")
-            else:
-                report.append("No specific recommendations - code looks good!")
-                
-            return '\n'.join(report)
-            
-        except Exception as e:
-            return f"Error analyzing {file_path}: {str(e)}"
+    def review(self, code: str) -> Dict:
+        """Perform automated code review with metrics and suggestions."""
+        metrics = self.analyze_code(code)
+        return {
+            'quality_score': round(metrics.score, 2),
+            'metrics': {
+                'complexity': metrics.complexity,
+                'total_lines': metrics.lines,
+                'comment_lines': metrics.comments,
+                'functions': metrics.functions,
+                'classes': metrics.classes
+            },
+            'suggestions': metrics.suggestions
+        }
