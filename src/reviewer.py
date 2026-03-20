@@ -1,131 +1,108 @@
-import os
-import requests
-from typing import List, Dict
+import ast
+import typing
 from dataclasses import dataclass
+from pathlib import Path
 
 @dataclass
-class CodeDiff:
-    filename: str
-    changes: str
-    added_lines: List[str]
-    removed_lines: List[str]
+class CodeMetrics:
+    cyclomatic_complexity: int
+    cognitive_complexity: int
+    lines_of_code: int
+    num_functions: int
+    recommendations: list[str]
 
-@dataclass
-class ReviewComment:
-    path: str
-    line: int
-    body: str
+class CodeReviewer:
+    def __init__(self):
+        self.complexity_threshold = 10
 
-class AICodeReviewer:
-    def __init__(self, github_token: str, openai_key: str):
-        self.github_token = github_token
-        self.openai_key = openai_key
-        self.github_headers = {
-            'Authorization': f'token {github_token}',
-            'Accept': 'application/vnd.github.v3+json'
-        }
-
-    def get_pr_diff(self, repo: str, pr_number: int) -> List[CodeDiff]:
-        """Fetch the PR diff from GitHub API"""
-        url = f'https://api.github.com/repos/{repo}/pulls/{pr_number}'
-        response = requests.get(f'{url}/files', headers=self.github_headers)
-        response.raise_for_status()
+    def analyze_file(self, file_path: Path) -> CodeMetrics:
+        """Analyzes a Python file and returns code quality metrics with recommendations."""
+        with open(file_path) as f:
+            content = f.read()
         
-        diffs = []
-        for file in response.json():
-            added = [line[1:] for line in file['patch'].split('\n') if line.startswith('+')]
-            removed = [line[1:] for line in file['patch'].split('\n') if line.startswith('-')]
-            diffs.append(CodeDiff(
-                filename=file['filename'],
-                changes=file['patch'],
-                added_lines=added,
-                removed_lines=removed
-            ))
-        return diffs
-
-    def analyze_diff(self, diff: CodeDiff) -> List[ReviewComment]:
-        """Generate review comments using LLM analysis"""
-        prompt = f"""Review this code change and provide specific, actionable feedback:
-        File: {diff.filename}
-        Changes:
-        {diff.changes}
+        tree = ast.parse(content)
+        metrics = self._calculate_metrics(tree)
+        recommendations = self._generate_recommendations(metrics)
         
-        Focus on:
-        1. Potential bugs or errors
-        2. Security concerns
-        3. Performance implications
-        4. Code style and best practices
-        5. Maintainability issues
-        
-        Format each issue as: <line_number>: <comment>"""
-
-        # Call OpenAI API
-        headers = {'Authorization': f'Bearer {self.openai_key}'}
-        response = requests.post(
-            'https://api.openai.com/v1/chat/completions',
-            headers=headers,
-            json={
-                'model': 'gpt-4',
-                'messages': [{'role': 'user', 'content': prompt}],
-                'temperature': 0.7
-            }
+        return CodeMetrics(
+            cyclomatic_complexity=metrics['cyclomatic'],
+            cognitive_complexity=metrics['cognitive'],
+            lines_of_code=metrics['loc'],
+            num_functions=metrics['functions'],
+            recommendations=recommendations
         )
-        response.raise_for_status()
-        
-        # Parse LLM response into ReviewComments
-        comments = []
-        for line in response.json()['choices'][0]['message']['content'].split('\n'):
-            if ':' in line:
-                line_num, comment = line.split(':', 1)
-                try:
-                    comments.append(ReviewComment(
-                        path=diff.filename,
-                        line=int(line_num),
-                        body=comment.strip()
-                    ))
-                except ValueError:
-                    continue
-        return comments
-
-    def review_pr(self, repo: str, pr_number: int) -> List[ReviewComment]:
-        """Review a complete PR and return all review comments"""
-        all_comments = []
-        diffs = self.get_pr_diff(repo, pr_number)
-        
-        for diff in diffs:
-            comments = self.analyze_diff(diff)
-            all_comments.extend(comments)
-            
-        return all_comments
-
-    def post_review(self, repo: str, pr_number: int, comments: List[ReviewComment]):
-        """Post review comments to GitHub PR"""
-        url = f'https://api.github.com/repos/{repo}/pulls/{pr_number}/reviews'
-        
-        review_body = 'AI Code Review Comments:\n\n'
-        review_comments = []
-        
-        for comment in comments:
-            review_body += f'* {comment.path} line {comment.line}: {comment.body}\n'
-            review_comments.append({
-                'path': comment.path,
-                'line': comment.line,
-                'body': comment.body
-            })
-        
-        data = {
-            'commit_id': self.get_pr_head_sha(repo, pr_number),
-            'body': review_body,
-            'event': 'COMMENT',
-            'comments': review_comments
+    
+    def _calculate_metrics(self, tree: ast.AST) -> dict:
+        """Calculates various code complexity metrics from AST."""
+        metrics = {
+            'cyclomatic': 1,  # Base complexity of 1
+            'cognitive': 0,
+            'loc': len(tree.body),
+            'functions': 0
         }
         
-        response = requests.post(url, headers=self.github_headers, json=data)
-        response.raise_for_status()
+        for node in ast.walk(tree):
+            # Count control flow statements for cyclomatic complexity
+            if isinstance(node, (ast.If, ast.While, ast.For, ast.ExceptHandler)):
+                metrics['cyclomatic'] += 1
+            elif isinstance(node, ast.BoolOp):
+                metrics['cyclomatic'] += len(node.values) - 1
+                
+            # Count nested structures for cognitive complexity
+            if isinstance(node, (ast.If, ast.While, ast.For)):
+                metrics['cognitive'] += 1
+                
+            # Count function definitions
+            if isinstance(node, ast.FunctionDef):
+                metrics['functions'] += 1
+                
+        return metrics
+    
+    def _generate_recommendations(self, metrics: dict) -> list[str]:
+        """Generates specific recommendations based on code metrics."""
+        recommendations = []
         
-    def get_pr_head_sha(self, repo: str, pr_number: int) -> str:
-        """Get the HEAD SHA for the PR"""
-        url = f'https://api.github.com/repos/{repo}/pulls/{pr_number}'
-        response = requests.get(url, headers=self.github_headers)
-        response.raise_for_status()
-        return response.json()['head']['sha']
+        if metrics['cyclomatic'] > self.complexity_threshold:
+            recommendations.append(
+                f"High cyclomatic complexity ({metrics['cyclomatic']}). Consider breaking down complex functions."
+            )
+            
+        if metrics['cognitive'] > self.complexity_threshold:
+            recommendations.append(
+                f"High cognitive complexity ({metrics['cognitive']}). Consider simplifying nested logic."
+            )
+            
+        if metrics['loc'] > 300:
+            recommendations.append(
+                "File is quite long. Consider splitting into multiple modules."
+            )
+            
+        if metrics['functions'] > 10:
+            recommendations.append(
+                "Large number of functions. Consider grouping related functions into separate classes/modules."
+            )
+            
+        return recommendations
+
+    def review(self, file_path: Path) -> str:
+        """Main entry point for code review."""
+        try:
+            metrics = self.analyze_file(file_path)
+            
+            report = [f"Code Review Report for {file_path}\n"]
+            report.append(f"Lines of Code: {metrics.lines_of_code}")
+            report.append(f"Cyclomatic Complexity: {metrics.cyclomatic_complexity}")
+            report.append(f"Cognitive Complexity: {metrics.cognitive_complexity}")
+            report.append(f"Number of Functions: {metrics.num_functions}\n")
+            
+            if metrics.recommendations:
+                report.append("Recommendations:")
+                for i, rec in enumerate(metrics.recommendations, 1):
+                    report.append(f"{i}. {rec}")
+            else:
+                report.append("No specific recommendations - code looks good!")
+                
+            return '\n'.join(report)
+            
+        except Exception as e:
+            return f"Error analyzing {file_path}: {str(e)}"
