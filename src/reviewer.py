@@ -1,124 +1,105 @@
-"""AI-powered code review automation with quality scoring."""
-
-import ast
-from dataclasses import dataclass
-from typing import List, Dict
-import statistics
-
-@dataclass
-class CodeMetrics:
-    complexity: int
-    lines: int 
-    comments: int
-    functions: int
-    classes: int
-    score: float
-    suggestions: List[str]
+import difflib
+import re
+from typing import List, Dict, Tuple
 
 class CodeReviewer:
     def __init__(self):
-        self.quality_thresholds = {
-            'complexity': {'good': 10, 'warning': 20},
-            'comments_ratio': {'good': 0.1, 'warning': 0.05},
-            'function_length': {'good': 20, 'warning': 40}
+        self.common_issues = {
+            'unused_import': r'^import \w+ as \w+$',
+            'todo_comment': r'# TODO',
+            'print_debug': r'print\(',
+            'bare_except': r'except:'
         }
-    
-    def analyze_code(self, code: str) -> CodeMetrics:
-        """Analyze code and return detailed metrics with quality score."""
-        tree = ast.parse(code)
-        
-        metrics = CodeMetrics(
-            complexity=self._calculate_complexity(tree),
-            lines=len(code.splitlines()),
-            comments=self._count_comments(code),
-            functions=len([n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)]),
-            classes=len([n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)]),
-            score=0.0,
-            suggestions=[]
-        )
-        
-        metrics.score = self._calculate_quality_score(metrics)
-        metrics.suggestions = self._generate_suggestions(metrics)
-        
-        return metrics
-    
-    def _calculate_complexity(self, tree: ast.AST) -> int:
-        """Calculate cyclomatic complexity."""
-        complexity = 1
-        for node in ast.walk(tree):
-            if isinstance(node, (ast.If, ast.While, ast.For, ast.ExceptHandler)):
-                complexity += 1
-            elif isinstance(node, ast.BoolOp):
-                complexity += len(node.values) - 1
-        return complexity
-    
-    def _count_comments(self, code: str) -> int:
-        """Count number of comment lines."""
-        return len([line for line in code.splitlines() 
-                   if line.strip().startswith('#') or line.strip().startswith('"""")])
-    
-    def _calculate_quality_score(self, metrics: CodeMetrics) -> float:
-        """Calculate overall code quality score (0-10)."""
-        scores = []
-        
-        # Complexity score
-        if metrics.complexity <= self.quality_thresholds['complexity']['good']:
-            scores.append(10)
-        elif metrics.complexity <= self.quality_thresholds['complexity']['warning']:
-            scores.append(7)
-        else:
-            scores.append(4)
-        
-        # Comments ratio score
-        comments_ratio = metrics.comments / metrics.lines if metrics.lines > 0 else 0
-        if comments_ratio >= self.quality_thresholds['comments_ratio']['good']:
-            scores.append(10)
-        elif comments_ratio >= self.quality_thresholds['comments_ratio']['warning']:
-            scores.append(7)
-        else:
-            scores.append(4)
-        
-        # Average function length score
-        avg_func_length = metrics.lines / metrics.functions if metrics.functions > 0 else metrics.lines
-        if avg_func_length <= self.quality_thresholds['function_length']['good']:
-            scores.append(10)
-        elif avg_func_length <= self.quality_thresholds['function_length']['warning']:
-            scores.append(7)
-        else:
-            scores.append(4)
-            
-        return statistics.mean(scores)
-    
-    def _generate_suggestions(self, metrics: CodeMetrics) -> List[str]:
-        """Generate improvement suggestions based on metrics."""
-        suggestions = []
-        
-        if metrics.complexity > self.quality_thresholds['complexity']['warning']:
-            suggestions.append(
-                f'High complexity ({metrics.complexity}). Consider breaking down complex functions.')
-        
-        comments_ratio = metrics.comments / metrics.lines if metrics.lines > 0 else 0
-        if comments_ratio < self.quality_thresholds['comments_ratio']['warning']:
-            suggestions.append('Low comment density. Consider adding more documentation.')
-        
-        avg_func_length = metrics.lines / metrics.functions if metrics.functions > 0 else metrics.lines
-        if avg_func_length > self.quality_thresholds['function_length']['warning']:
-            suggestions.append(
-                f'Average function length ({avg_func_length:.1f} lines) is high. Consider breaking down large functions.')
-        
-        return suggestions
 
-    def review(self, code: str) -> Dict:
-        """Perform automated code review with metrics and suggestions."""
-        metrics = self.analyze_code(code)
+    def analyze_diff(self, old_content: str, new_content: str) -> List[Dict]:
+        """Analyze code changes between versions and provide contextual feedback."""
+        diff = list(difflib.unified_diff(
+            old_content.splitlines(),
+            new_content.splitlines(),
+            lineterm=''
+        ))
+        
+        issues = []
+        context = []
+        current_block = []
+        
+        for line in diff:
+            if line.startswith('@@'):
+                if current_block:
+                    issues.extend(self._analyze_block(current_block, context))
+                current_block = []
+                context = []
+            elif line.startswith((' ', '+', '-')):
+                if line.startswith(' '):
+                    context.append(line[1:])
+                current_block.append(line)
+        
+        if current_block:
+            issues.extend(self._analyze_block(current_block, context))
+            
+        return issues
+
+    def _analyze_block(self, block: List[str], context: List[str]) -> List[Dict]:
+        """Analyze a single diff block with its surrounding context."""
+        issues = []
+        
+        added_lines = [line[1:] for line in block if line.startswith('+')]
+        removed_lines = [line[1:] for line in block if line.startswith('-')]
+        
+        # Analyze code patterns
+        for line in added_lines:
+            for issue_type, pattern in self.common_issues.items():
+                if re.search(pattern, line):
+                    issues.append({
+                        'type': issue_type,
+                        'line': line,
+                        'suggestion': self._get_suggestion(issue_type, line)
+                    })
+        
+        # Analyze structural changes
+        if len(added_lines) > 0 and len(removed_lines) > 0:
+            similarity = self._calculate_similarity(added_lines[0], removed_lines[0])
+            if similarity > 0.8:  # High similarity suggests a minor change
+                issues.append(self._analyze_similar_changes(added_lines[0], removed_lines[0]))
+        
+        return issues
+
+    def _calculate_similarity(self, str1: str, str2: str) -> float:
+        """Calculate similarity ratio between two strings."""
+        return difflib.SequenceMatcher(None, str1, str2).ratio()
+
+    def _analyze_similar_changes(self, new_line: str, old_line: str) -> Dict:
+        """Analyze and provide feedback for similar line changes."""
+        differences = []
+        for i, s in enumerate(difflib.ndiff(old_line, new_line)):
+            if s[0] in '+-':
+                differences.append(s[2])
+        
         return {
-            'quality_score': round(metrics.score, 2),
-            'metrics': {
-                'complexity': metrics.complexity,
-                'total_lines': metrics.lines,
-                'comment_lines': metrics.comments,
-                'functions': metrics.functions,
-                'classes': metrics.classes
-            },
-            'suggestions': metrics.suggestions
+            'type': 'minor_change',
+            'old_line': old_line,
+            'new_line': new_line,
+            'differences': ''.join(differences),
+            'suggestion': 'Consider if this minor change was intentional'
         }
+
+    def _get_suggestion(self, issue_type: str, line: str) -> str:
+        """Get specific suggestion based on the issue type."""
+        suggestions = {
+            'unused_import': 'Remove unused import or utilize the imported module',
+            'todo_comment': 'Consider implementing TODO or creating an issue ticket',
+            'print_debug': 'Remove debug print statements in production code',
+            'bare_except': 'Specify exception type instead of using bare except'
+        }
+        return suggestions.get(issue_type, 'Review this line for potential improvements')
+
+    def review_files(self, files: Dict[str, Tuple[str, str]]) -> Dict[str, List[Dict]]:
+        """Review multiple files and their changes.
+        
+        Args:
+            files: Dict mapping filenames to tuples of (old_content, new_content)
+        """
+        results = {}
+        for filename, (old, new) in files.items():
+            results[filename] = self.analyze_diff(old, new)
+        return results
