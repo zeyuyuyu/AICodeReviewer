@@ -4,103 +4,102 @@ from dataclasses import dataclass
 from pathlib import Path
 
 @dataclass
-class CodeMetrics:
-    complexity: int
-    lines_of_code: int
-    comment_ratio: float
-    max_nesting: int
-    avg_function_length: float
-
-@dataclass
-class ReviewResult:
-    metrics: CodeMetrics
-    score: float  # 0-100
-    suggestions: list[str]
+class CodeIssue:
+    line_number: int
+    message: str
+    severity: str  # 'error', 'warning', or 'info'
+    suggestion: str
 
 class CodeReviewer:
     def __init__(self):
-        self.quality_thresholds = {
-            'max_complexity': 10,
-            'max_nesting': 4,
-            'min_comment_ratio': 0.1,
-            'max_function_length': 50
-        }
+        self.issues: typing.List[CodeIssue] = []
 
-    def review_file(self, file_path: Path) -> ReviewResult:
-        with open(file_path) as f:
-            code = f.read()
+    def review_file(self, filepath: Path) -> typing.List[CodeIssue]:
+        """Analyze a Python file for code quality issues"""
+        with open(filepath, 'r') as f:
+            content = f.read()
         
-        tree = ast.parse(code)
-        metrics = self._calculate_metrics(tree, code)
-        score = self._calculate_score(metrics)
-        suggestions = self._generate_suggestions(metrics)
-        
-        return ReviewResult(metrics, score, suggestions)
+        try:
+            tree = ast.parse(content)
+            self._analyze_complexity(tree)
+            self._check_naming_conventions(tree)
+            self._detect_anti_patterns(tree)
+            return self.issues
+        except SyntaxError as e:
+            self.issues.append(CodeIssue(
+                line_number=e.lineno or 0,
+                message=f'Syntax error: {str(e)}',
+                severity='error',
+                suggestion='Fix the syntax error to proceed with analysis'
+            ))
+            return self.issues
 
-    def _calculate_metrics(self, tree: ast.AST, code: str) -> CodeMetrics:
-        complexity = 0
-        max_nesting = 0
-        function_lengths = []
-        
-        class Analyzer(ast.NodeVisitor):
-            def __init__(self):
-                self.current_nesting = 0
+    def _analyze_complexity(self, tree: ast.AST) -> None:
+        """Analyze code complexity metrics"""
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef):
+                # Check function length
+                if len(node.body) > 20:
+                    self.issues.append(CodeIssue(
+                        line_number=node.lineno,
+                        message=f'Function {node.name} is too long ({len(node.body)} lines)',
+                        severity='warning',
+                        suggestion='Consider breaking this function into smaller, more focused functions'
+                    ))
+                
+                # Check number of arguments
+                if len(node.args.args) > 5:
+                    self.issues.append(CodeIssue(
+                        line_number=node.lineno,
+                        message=f'Function {node.name} has too many parameters ({len(node.args.args)})',
+                        severity='warning',
+                        suggestion='Consider grouping related parameters into a class or data structure'
+                    ))
 
-            def visit_If(self, node):
-                nonlocal complexity
-                complexity += 1
-                self.current_nesting += 1
-                max_nesting = max(max_nesting, self.current_nesting)
-                self.generic_visit(node)
-                self.current_nesting -= 1
+    def _check_naming_conventions(self, tree: ast.AST) -> None:
+        """Check Python naming conventions"""
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef):
+                if not node.name[0].isupper():
+                    self.issues.append(CodeIssue(
+                        line_number=node.lineno,
+                        message=f'Class name {node.name} should use CapWords convention',
+                        severity='info',
+                        suggestion=f'Rename to {node.name[0].upper() + node.name[1:]}'
+                    ))
+            elif isinstance(node, ast.FunctionDef):
+                if not node.name.islower():
+                    self.issues.append(CodeIssue(
+                        line_number=node.lineno,
+                        message=f'Function name {node.name} should use lowercase_with_underscores convention',
+                        severity='info',
+                        suggestion=f'Rename to {node.name.lower()}'
+                    ))
 
-            def visit_FunctionDef(self, node):
-                function_lengths.append(node.end_lineno - node.lineno)
-                self.generic_visit(node)
+    def _detect_anti_patterns(self, tree: ast.AST) -> None:
+        """Detect common anti-patterns"""
+        for node in ast.walk(tree):
+            # Detect bare except clauses
+            if isinstance(node, ast.ExceptHandler) and node.type is None:
+                self.issues.append(CodeIssue(
+                    line_number=node.lineno,
+                    message='Bare except clause detected',
+                    severity='error',
+                    suggestion='Specify the exception types you want to catch'
+                ))
+            
+            # Detect mutable default arguments
+            if isinstance(node, ast.FunctionDef):
+                for default in node.args.defaults:
+                    if isinstance(default, (ast.List, ast.Dict, ast.Set)):
+                        self.issues.append(CodeIssue(
+                            line_number=node.lineno,
+                            message='Mutable default argument detected',
+                            severity='warning',
+                            suggestion='Use None as default and initialize mutable objects inside the function'
+                        ))
 
-        Analyzer().visit(tree)
-
-        lines = code.split('\n')
-        comment_lines = sum(1 for line in lines if line.strip().startswith('#'))
-        
-        return CodeMetrics(
-            complexity=complexity,
-            lines_of_code=len(lines),
-            comment_ratio=comment_lines / len(lines) if lines else 0,
-            max_nesting=max_nesting,
-            avg_function_length=sum(function_lengths) / len(function_lengths) if function_lengths else 0
-        )
-
-    def _calculate_score(self, metrics: CodeMetrics) -> float:
-        score = 100.0
-        
-        if metrics.complexity > self.quality_thresholds['max_complexity']:
-            score -= 10 * (metrics.complexity - self.quality_thresholds['max_complexity'])
-            
-        if metrics.max_nesting > self.quality_thresholds['max_nesting']:
-            score -= 15 * (metrics.max_nesting - self.quality_thresholds['max_nesting'])
-            
-        if metrics.comment_ratio < self.quality_thresholds['min_comment_ratio']:
-            score -= 20 * (self.quality_thresholds['min_comment_ratio'] - metrics.comment_ratio)
-            
-        if metrics.avg_function_length > self.quality_thresholds['max_function_length']:
-            score -= 5 * (metrics.avg_function_length - self.quality_thresholds['max_function_length'])
-            
-        return max(0, min(100, score))
-
-    def _generate_suggestions(self, metrics: CodeMetrics) -> list[str]:
-        suggestions = []
-        
-        if metrics.complexity > self.quality_thresholds['max_complexity']:
-            suggestions.append(f'Consider reducing cyclomatic complexity (current: {metrics.complexity})')
-            
-        if metrics.max_nesting > self.quality_thresholds['max_nesting']:
-            suggestions.append(f'Reduce nesting depth (current max: {metrics.max_nesting})')
-            
-        if metrics.comment_ratio < self.quality_thresholds['min_comment_ratio']:
-            suggestions.append('Add more comments to improve code documentation')
-            
-        if metrics.avg_function_length > self.quality_thresholds['max_function_length']:
-            suggestions.append('Consider breaking down long functions into smaller ones')
-            
-        return suggestions
+def review_code(filepath: str) -> typing.List[CodeIssue]:
+    """Main entry point for code review"""
+    reviewer = CodeReviewer()
+    return reviewer.review_file(Path(filepath))
