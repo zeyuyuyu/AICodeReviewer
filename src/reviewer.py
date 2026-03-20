@@ -1,139 +1,131 @@
 import ast
 import typing
 from dataclasses import dataclass
-from enum import Enum
+from pathlib import Path
 
 @dataclass
 class CodeMetrics:
     complexity: int
-    lines_of_code: int
-    comment_ratio: float
-    max_nesting: int
-    avg_function_length: float
+    lines: int
+    functions: int
+    classes: int
+    comments: int
+    maintainability_index: float
 
 @dataclass 
-class ReviewResult:
-    score: float  # 0-100
-    metrics: CodeMetrics
-    suggestions: list[str]
+class ReviewFinding:
     severity: str
-
-class Severity(Enum):
-    LOW = 'low'
-    MEDIUM = 'medium'
-    HIGH = 'high'
-    CRITICAL = 'critical'
+    message: str
+    line: int
+    recommendation: str
 
 class CodeReviewer:
     def __init__(self):
-        self.ast_analyzer = ASTAnalyzer()
+        self.metrics = None
+        self.findings = []
 
-    def review_code(self, code: str) -> ReviewResult:
-        """Analyzes code and returns detailed review metrics"""
-        tree = ast.parse(code)
-        metrics = self._calculate_metrics(tree, code)
-        score = self._calculate_score(metrics)
-        suggestions = self._generate_suggestions(metrics)
-        severity = self._determine_severity(score)
-
-        return ReviewResult(
-            score=score,
-            metrics=metrics,
-            suggestions=suggestions,
-            severity=severity
-        )
-
-    def _calculate_metrics(self, tree: ast.AST, raw_code: str) -> CodeMetrics:
-        complexity = self.ast_analyzer.calculate_complexity(tree)
-        lines = len(raw_code.splitlines())
-        comments = self.ast_analyzer.count_comments(raw_code)
-        nesting = self.ast_analyzer.max_nesting_depth(tree)
-        avg_func_len = self.ast_analyzer.average_function_length(tree)
-
-        return CodeMetrics(
-            complexity=complexity,
-            lines_of_code=lines,
-            comment_ratio=comments/lines if lines > 0 else 0,
-            max_nesting=nesting,
-            avg_function_length=avg_func_len
-        )
-
-    def _calculate_score(self, metrics: CodeMetrics) -> float:
-        # Weight different factors to produce overall 0-100 score
-        weights = {
-            'complexity': -0.2,
-            'nesting': -0.2,
-            'comment_ratio': 0.3,
-            'function_length': -0.3
-        }
-
-        score = 100
-        score += metrics.complexity * weights['complexity']
-        score += metrics.max_nesting * weights['nesting'] 
-        score += metrics.comment_ratio * 100 * weights['comment_ratio']
-        score += metrics.avg_function_length * weights['function_length']
-
-        return max(0, min(100, score))
-
-    def _generate_suggestions(self, metrics: CodeMetrics) -> list[str]:
-        suggestions = []
+    def analyze_file(self, filepath: Path) -> typing.Tuple[CodeMetrics, list[ReviewFinding]]:
+        """Analyze a Python source file and return metrics and review findings."""
+        with open(filepath) as f:
+            content = f.read()
         
-        if metrics.complexity > 10:
-            suggestions.append('Consider breaking down complex logic into smaller functions')
-        if metrics.comment_ratio < 0.1:
-            suggestions.append('Add more documentation comments to improve code clarity')
-        if metrics.max_nesting > 4:
-            suggestions.append('Reduce nesting depth by extracting logic into helper functions')
-        if metrics.avg_function_length > 20:
-            suggestions.append('Break long functions into smaller, more focused ones')
+        # Parse AST
+        tree = ast.parse(content)
+        
+        # Calculate metrics
+        self.metrics = self._calculate_metrics(content, tree)
+        
+        # Generate findings
+        self.findings = []
+        self._check_complexity(tree)
+        self._check_naming(tree)
+        self._check_best_practices(tree)
+        
+        return self.metrics, self.findings
 
-        return suggestions
-
-    def _determine_severity(self, score: float) -> str:
-        if score < 40:
-            return Severity.CRITICAL.value
-        elif score < 60:
-            return Severity.HIGH.value
-        elif score < 80:
-            return Severity.MEDIUM.value
-        return Severity.LOW.value
-
-class ASTAnalyzer:
-    def calculate_complexity(self, tree: ast.AST) -> int:
-        """Calculate cyclomatic complexity"""
+    def _calculate_metrics(self, content: str, tree: ast.AST) -> CodeMetrics:
+        lines = len(content.splitlines())
+        functions = len([n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)])
+        classes = len([n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)])
+        comments = len([l for l in content.splitlines() if l.strip().startswith('#')])
+        
+        # Calculate cyclomatic complexity
         complexity = 1
         for node in ast.walk(tree):
-            if isinstance(node, (ast.If, ast.While, ast.For, ast.Try,
-                               ast.ExceptHandler, ast.With, ast.Assert)):
+            if isinstance(node, (ast.If, ast.While, ast.For, ast.ExceptHandler)):
                 complexity += 1
             elif isinstance(node, ast.BoolOp):
                 complexity += len(node.values) - 1
-        return complexity
-
-    def count_comments(self, code: str) -> int:
-        """Count number of comment lines"""
-        return len([line for line in code.splitlines() 
-                   if line.strip().startswith('#')])
-
-    def max_nesting_depth(self, tree: ast.AST) -> int:
-        """Calculate maximum nesting depth"""
-        def get_depth(node, current=0):
-            max_depth = current
-            for child in ast.iter_child_nodes(node):
-                if isinstance(child, (ast.If, ast.For, ast.While, ast.With)):
-                    child_depth = get_depth(child, current + 1)
-                    max_depth = max(max_depth, child_depth)
-                else:
-                    child_depth = get_depth(child, current)
-                    max_depth = max(max_depth, child_depth)
-            return max_depth
         
-        return get_depth(tree)
+        # Simple maintainability index calculation
+        maintainability = 100 - (complexity * 0.5 + lines * 0.1)
+        
+        return CodeMetrics(
+            complexity=complexity,
+            lines=lines,
+            functions=functions,
+            classes=classes,
+            comments=comments,
+            maintainability_index=maintainability
+        )
 
-    def average_function_length(self, tree: ast.AST) -> float:
-        """Calculate average function length in lines"""
-        lengths = []
+    def _check_complexity(self, tree: ast.AST) -> None:
+        """Check for complexity issues"""
         for node in ast.walk(tree):
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                lengths.append(node.end_lineno - node.lineno)
-        return sum(lengths) / len(lengths) if lengths else 0
+            if isinstance(node, ast.FunctionDef):
+                if len(node.body) > 50:
+                    self.findings.append(ReviewFinding(
+                        severity='high',
+                        message=f'Function {node.name} is too long',
+                        line=node.lineno,
+                        recommendation='Consider breaking down into smaller functions'
+                    ))
+
+    def _check_naming(self, tree: ast.AST) -> None:
+        """Check naming conventions"""
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef):
+                if not node.name[0].isupper():
+                    self.findings.append(ReviewFinding(
+                        severity='medium',
+                        message=f'Class {node.name} should use CapWords convention',
+                        line=node.lineno,
+                        recommendation='Rename using CapWords style'
+                    ))
+
+    def _check_best_practices(self, tree: ast.AST) -> None:
+        """Check Python best practices"""
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Compare):
+                if isinstance(node.ops[0], (ast.Is, ast.IsNot)) and \
+                   isinstance(node.comparators[0], ast.Constant) and \
+                   node.comparators[0].value in (True, False, None):
+                    self.findings.append(ReviewFinding(
+                        severity='low',
+                        message='Use == instead of is for literal comparisons',
+                        line=node.lineno,
+                        recommendation='Replace is with == for comparing with literals'
+                    ))
+
+def review_code(filepath: str) -> str:
+    """Main entry point for code review"""
+    reviewer = CodeReviewer()
+    metrics, findings = reviewer.analyze_file(Path(filepath))
+    
+    report = [f"Code Review Report for {filepath}\n"]
+    report.append("\nMetrics:")
+    report.append(f"- Complexity: {metrics.complexity}")
+    report.append(f"- Lines: {metrics.lines}")
+    report.append(f"- Functions: {metrics.functions}")
+    report.append(f"- Classes: {metrics.classes}")
+    report.append(f"- Comments: {metrics.comments}")
+    report.append(f"- Maintainability Index: {metrics.maintainability_index:.1f}/100\n")
+    
+    if findings:
+        report.append("\nFindings:")
+        for finding in findings:
+            report.append(f"\n[{finding.severity.upper()}] Line {finding.line}")
+            report.append(f"Message: {finding.message}")
+            report.append(f"Recommendation: {finding.recommendation}")
+    
+    return '\n'.join(report)
