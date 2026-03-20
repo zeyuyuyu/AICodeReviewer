@@ -1,98 +1,115 @@
-import os
+import ast
+import typing
 from dataclasses import dataclass
-from enum import Enum
-from typing import List, Optional
-
-class SeverityLevel(Enum):
-    HIGH = "HIGH"
-    MEDIUM = "MEDIUM"
-    LOW = "LOW"
+from pathlib import Path
 
 @dataclass
-class CodeReviewSuggestion:
-    line_number: int
+class CodeMetrics:
+    cognitive_complexity: int
+    cyclomatic_complexity: int
+    lines_of_code: int
+    comment_ratio: float
+    function_count: int
+    class_count: int
+
+@dataclass 
+class ReviewFinding:
+    severity: str
     message: str
-    severity: SeverityLevel
-    suggested_fix: Optional[str] = None
+    line_number: int
+    suggestion: str
 
-class AICodeReviewer:
-    def __init__(self, model_name: str = "gpt-3.5-turbo"):
-        self.model_name = model_name
-        self.api_key = os.getenv("OPENAI_API_KEY")
-        if not self.api_key:
-            raise ValueError("OPENAI_API_KEY environment variable must be set")
+class CodeReviewer:
+    def __init__(self):
+        self.complexity_threshold = 15
+        self.min_comment_ratio = 0.1
 
-    def review_file(self, file_path: str) -> List[CodeReviewSuggestion]:
-        """Review a single file and return a list of suggestions."""
-        with open(file_path, 'r') as f:
+    def analyze_file(self, filepath: Path) -> tuple[CodeMetrics, list[ReviewFinding]]:
+        """Analyzes a Python source file and returns metrics and review findings."""
+        with open(filepath) as f:
             content = f.read()
-        return self.review_code(content)
+        
+        tree = ast.parse(content)
+        metrics = self._calculate_metrics(tree, content)
+        findings = self._generate_findings(metrics, tree)
+        
+        return metrics, findings
 
-    def review_code(self, code: str) -> List[CodeReviewSuggestion]:
-        """Analyze code and return review suggestions with severity levels."""
-        # TODO: Implement actual LLM call here
-        suggestions = []
+    def _calculate_metrics(self, tree: ast.AST, content: str) -> CodeMetrics:
+        """Calculates code quality metrics from AST."""
+        visitor = ComplexityVisitor()
+        visitor.visit(tree)
+        
+        lines = content.splitlines()
+        comment_lines = sum(1 for line in lines if line.strip().startswith('#'))
+        
+        return CodeMetrics(
+            cognitive_complexity=visitor.cognitive_complexity,
+            cyclomatic_complexity=visitor.cyclomatic_complexity,
+            lines_of_code=len(lines),
+            comment_ratio=comment_lines / len(lines) if lines else 0,
+            function_count=len([node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)]),
+            class_count=len([node for node in ast.walk(tree) if isinstance(node, ast.ClassDef)])
+        )
 
-        # Example static analysis rules (to be replaced with LLM)
-        lines = code.split('\n')
-        for i, line in enumerate(lines, 1):
-            # Check for long lines
-            if len(line) > 100:
-                suggestions.append(
-                    CodeReviewSuggestion(
-                        line_number=i,
-                        message="Line exceeds 100 characters",
-                        severity=SeverityLevel.LOW
-                    )
-                )
+    def _generate_findings(self, metrics: CodeMetrics, tree: ast.AST) -> list[ReviewFinding]:
+        """Generates review findings based on metrics and code analysis."""
+        findings = []
+        
+        if metrics.cognitive_complexity > self.complexity_threshold:
+            findings.append(ReviewFinding(
+                severity='high',
+                message=f'Cognitive complexity of {metrics.cognitive_complexity} exceeds threshold of {self.complexity_threshold}',
+                line_number=1,
+                suggestion='Consider breaking down complex functions into smaller, more manageable pieces'
+            ))
+            
+        if metrics.comment_ratio < self.min_comment_ratio:
+            findings.append(ReviewFinding(
+                severity='medium',
+                message=f'Low comment ratio ({metrics.comment_ratio:.2%})',
+                line_number=1,
+                suggestion='Add more documentation to improve code maintainability'
+            ))
+            
+        # Analyze function lengths
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef):
+                if node.end_lineno - node.lineno > 50:
+                    findings.append(ReviewFinding(
+                        severity='medium',
+                        message=f'Function {node.name} is too long ({node.end_lineno - node.lineno} lines)',
+                        line_number=node.lineno,
+                        suggestion='Consider breaking this function into smaller functions'
+                    ))
+        
+        return findings
 
-            # Check for TODO comments
-            if 'TODO' in line:
-                suggestions.append(
-                    CodeReviewSuggestion(
-                        line_number=i,
-                        message="TODO comment found - consider implementing or removing",
-                        severity=SeverityLevel.MEDIUM
-                    )
-                )
+class ComplexityVisitor(ast.NodeVisitor):
+    def __init__(self):
+        self.cognitive_complexity = 0
+        self.cyclomatic_complexity = 1  # Base complexity
 
-            # Check for potential security issues
-            if 'eval(' in line or 'exec(' in line:
-                suggestions.append(
-                    CodeReviewSuggestion(
-                        line_number=i,
-                        message="Potentially dangerous code execution detected",
-                        severity=SeverityLevel.HIGH,
-                        suggested_fix="Consider using safer alternatives to eval/exec"
-                    )
-                )
+    def visit_If(self, node):
+        self.cognitive_complexity += 1
+        self.cyclomatic_complexity += 1
+        self.generic_visit(node)
 
-        return suggestions
+    def visit_While(self, node):
+        self.cognitive_complexity += 1
+        self.cyclomatic_complexity += 1
+        self.generic_visit(node)
 
-    def format_suggestions(self, suggestions: List[CodeReviewSuggestion]) -> str:
-        """Format review suggestions into a readable report."""
-        if not suggestions:
-            return "No issues found!"
+    def visit_For(self, node):
+        self.cognitive_complexity += 1
+        self.cyclomatic_complexity += 1
+        self.generic_visit(node)
 
-        report = ["Code Review Report:\n"]
-        for suggestion in sorted(suggestions, key=lambda x: x.severity.value):
-            report.append(
-                f"[{suggestion.severity.value}] Line {suggestion.line_number}: {suggestion.message}")
-            if suggestion.suggested_fix:
-                report.append(f"  Suggestion: {suggestion.suggested_fix}")
+    def visit_Try(self, node):
+        self.cognitive_complexity += 1
+        self.cyclomatic_complexity += len(node.handlers)
+        self.generic_visit(node)
 
-        return '\n'.join(report)
-
-    def review_and_report(self, file_path: str) -> str:
-        """Convenience method to review a file and get formatted results."""
-        suggestions = self.review_file(file_path)
-        return self.format_suggestions(suggestions)
-
-def main():
-    reviewer = AICodeReviewer()
-    # Example usage
-    result = reviewer.review_and_report("example.py")
-    print(result)
-
-if __name__ == "__main__":
-    main()
+    def visit_BoolOp(self, node):
+        self.cognitive_complexity += len(node.values) - 1
+        self.generic_visit(node)
