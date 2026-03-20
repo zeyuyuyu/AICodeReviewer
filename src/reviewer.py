@@ -1,142 +1,123 @@
 import ast
-import typing
-from dataclasses import dataclass
-from pathlib import Path
-
-@dataclass
-class CodeMetrics:
-    complexity: int
-    lines: int
-    functions: int
-    classes: int
-    comments: int
-    cognitive_score: float
-
-@dataclass 
-class ReviewResult:
-    quality_score: float # 0-100
-    metrics: CodeMetrics
-    suggestions: list[str]
+from typing import Dict, List, Tuple
 
 class CodeReviewer:
     def __init__(self):
-        self.quality_weights = {
-            'complexity': 0.3,
-            'documentation': 0.2,
-            'structure': 0.3,
-            'style': 0.2
+        self.metrics = {
+            'complexity': 0,
+            'maintainability': 0,
+            'documentation': 0
         }
 
-    def review_file(self, file_path: Path) -> ReviewResult:
-        """Analyzes Python code and returns detailed quality metrics."""
-        with open(file_path) as f:
-            code = f.read()
-        
-        tree = ast.parse(code)
-        metrics = self._analyze_code(tree, code)
-        suggestions = self._generate_suggestions(metrics)
-        quality_score = self._calculate_quality_score(metrics)
-        
-        return ReviewResult(
-            quality_score=quality_score,
-            metrics=metrics,
-            suggestions=suggestions
-        )
-    
-    def _analyze_code(self, tree: ast.AST, raw_code: str) -> CodeMetrics:
-        """Extract code metrics from AST and raw code."""
-        complexity = 0
-        functions = 0
-        classes = 0
-        comments = 0
-        
-        # Calculate cyclomatic complexity
+    def analyze_code(self, code: str) -> Dict:
+        """Analyze code and return comprehensive review results."""
+        try:
+            tree = ast.parse(code)
+            review_results = {
+                'metrics': self._calculate_metrics(tree),
+                'suggestions': self._generate_suggestions(tree),
+                'code_smells': self._detect_code_smells(tree)
+            }
+            return review_results
+        except SyntaxError as e:
+            return {'error': f'Syntax error in code: {str(e)}'}
+
+    def _calculate_metrics(self, tree: ast.AST) -> Dict:
+        """Calculate code quality metrics."""
+        metrics = {
+            'complexity': self._calculate_complexity(tree),
+            'lines_of_code': len(ast.unparse(tree).splitlines()),
+            'function_count': len([node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)]),
+            'class_count': len([node for node in ast.walk(tree) if isinstance(node, ast.ClassDef)]),
+            'comment_ratio': self._calculate_comment_ratio(tree)
+        }
+        return metrics
+
+    def _calculate_complexity(self, tree: ast.AST) -> int:
+        """Calculate cyclomatic complexity."""
+        complexity = 1
         for node in ast.walk(tree):
-            if isinstance(node, (ast.If, ast.While, ast.For, ast.Try)):
+            if isinstance(node, (ast.If, ast.While, ast.For, ast.ExceptHandler)):
                 complexity += 1
-            elif isinstance(node, ast.FunctionDef):
-                functions += 1
-            elif isinstance(node, ast.ClassDef):
-                classes += 1
-        
-        # Count comments
-        lines = raw_code.split('\n')
-        for line in lines:
-            if line.strip().startswith('#'):
-                comments += 1
-                
-        # Calculate cognitive complexity based on nesting and structures
-        cognitive_score = self._calculate_cognitive_complexity(tree)
-        
-        return CodeMetrics(
-            complexity=complexity,
-            lines=len(lines),
-            functions=functions,
-            classes=classes,
-            comments=comments,
-            cognitive_score=cognitive_score
-        )
-    
-    def _calculate_cognitive_complexity(self, tree: ast.AST) -> float:
-        """Calculate cognitive complexity score based on code structure."""
-        score = 0.0
-        nesting_level = 0
-        
-        for node in ast.walk(tree):
-            if isinstance(node, (ast.If, ast.While, ast.For)):
-                score += (1 + nesting_level)
-                nesting_level += 1
-            elif isinstance(node, ast.FunctionDef):
-                nesting_level = 0
-        
-        return score
-    
-    def _calculate_quality_score(self, metrics: CodeMetrics) -> float:
-        """Calculate overall quality score from 0-100."""
-        # Complexity score (lower is better)
-        complexity_score = max(0, 100 - (metrics.complexity * 5))
-        
-        # Documentation score
-        doc_ratio = metrics.comments / max(1, metrics.lines)
-        doc_score = min(100, doc_ratio * 500)
-        
-        # Structure score
-        structure_score = min(100, (
-            (metrics.functions + metrics.classes) / 
-            max(1, metrics.lines) * 300
-        ))
-        
-        # Style score based on cognitive complexity
-        style_score = max(0, 100 - (metrics.cognitive_score * 10))
-        
-        # Weighted average
-        final_score = (
-            complexity_score * self.quality_weights['complexity'] +
-            doc_score * self.quality_weights['documentation'] +
-            structure_score * self.quality_weights['structure'] +
-            style_score * self.quality_weights['style']
-        )
-        
-        return round(final_score, 2)
-    
-    def _generate_suggestions(self, metrics: CodeMetrics) -> list[str]:
-        """Generate improvement suggestions based on metrics."""
+            elif isinstance(node, ast.BoolOp):
+                complexity += len(node.values) - 1
+        return complexity
+
+    def _calculate_comment_ratio(self, tree: ast.AST) -> float:
+        """Calculate ratio of comments to code."""
+        code_lines = len(ast.unparse(tree).splitlines())
+        comment_lines = len([node for node in ast.walk(tree) if isinstance(node, ast.Expr) 
+                            and isinstance(node.value, ast.Str)])
+        return comment_lines / code_lines if code_lines > 0 else 0
+
+    def _generate_suggestions(self, tree: ast.AST) -> List[str]:
+        """Generate improvement suggestions based on code analysis."""
         suggestions = []
         
-        if metrics.complexity > 10:
-            suggestions.append(
-                'Consider breaking down complex logic into smaller functions'
-            )
+        # Check for long functions
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef):
+                if len(node.body) > 15:
+                    suggestions.append(f'Consider breaking down function "{node.name}" into smaller functions')
+                if len(node.args.args) > 5:
+                    suggestions.append(f'Function "{node.name}" has too many parameters. Consider refactoring')
+
+        # Check for nested complexity
+        self._check_nesting(tree, suggestions)
         
-        if metrics.cognitive_score > 15:
-            suggestions.append(
-                'High cognitive complexity - simplify nested conditions'
-            )
-            
-        if metrics.comments / max(1, metrics.lines) < 0.1:
-            suggestions.append('Add more documentation to improve maintainability')
-            
-        if metrics.lines / max(1, metrics.functions) > 50:
-            suggestions.append('Functions may be too long - consider refactoring')
-            
         return suggestions
+
+    def _check_nesting(self, tree: ast.AST, suggestions: List[str], max_depth: int = 3) -> None:
+        """Check for deeply nested code."""
+        def get_nesting_level(node, current_depth=0):
+            if isinstance(node, (ast.If, ast.For, ast.While)):
+                current_depth += 1
+                if current_depth > max_depth:
+                    suggestions.append(f'Deep nesting detected. Consider refactoring to reduce complexity')
+            for child in ast.iter_child_nodes(node):
+                get_nesting_level(child, current_depth)
+                
+        get_nesting_level(tree)
+
+    def _detect_code_smells(self, tree: ast.AST) -> List[str]:
+        """Detect common code smells."""
+        smells = []
+        
+        # Check for large classes
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef):
+                method_count = len([n for n in node.body if isinstance(n, ast.FunctionDef)])
+                if method_count > 10:
+                    smells.append(f'Class "{node.name}" might violate Single Responsibility Principle')
+
+        # Check for duplicate code (simplified)
+        seen_code = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef):
+                code = ast.unparse(node)
+                if code in seen_code:
+                    smells.append(f'Possible code duplication in function "{node.name}"')
+                seen_code.add(code)
+
+        return smells
+
+    def generate_report(self, review_results: Dict) -> str:
+        """Generate a formatted report from review results."""
+        report = ["=== Code Review Report ==="]
+        
+        # Add metrics section
+        report.append("\nCode Metrics:")
+        for metric, value in review_results.get('metrics', {}).items():
+            report.append(f"- {metric}: {value}")
+
+        # Add suggestions section
+        report.append("\nSuggestions:")
+        for suggestion in review_results.get('suggestions', []):
+            report.append(f"- {suggestion}")
+
+        # Add code smells section
+        report.append("\nCode Smells:")
+        for smell in review_results.get('code_smells', []):
+            report.append(f"- {smell}")
+
+        return '\n'.join(report)
