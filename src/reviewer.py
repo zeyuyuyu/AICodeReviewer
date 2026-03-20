@@ -1,132 +1,104 @@
-import ast
-import typing
+import os
+from typing import List, Dict
 from dataclasses import dataclass
-from pathlib import Path
 
 @dataclass
-class CodeMetrics:
-    complexity: int
-    lines_of_code: int
-    comment_ratio: float
-    function_count: int
-    class_count: int
-    maintainability_index: float
+class CodeReview:
+    summary: str
+    issues: List[Dict]
+    suggestions: List[str]
+    code_quality_score: float
 
-@dataclass 
-class ReviewSuggestion:
-    line_number: int
-    severity: str
-    message: str
-    suggestion: str
+class AICodeReviewer:
+    def __init__(self, model_name: str = 'gpt-4'):
+        self.model_name = model_name
+        self.review_patterns = {
+            'security': ['eval(', 'exec(', 'os.system('],
+            'performance': ['O(n^2)', '.*while True.*'],
+            'style': ['\t', '  +']
+        }
+    
+    def review_file(self, file_path: str) -> CodeReview:
+        """Perform an AI-powered code review on a single file."""
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f'File not found: {file_path}')
 
-class CodeReviewer:
-    def __init__(self):
-        self.metrics = None
-        self.suggestions = []
+        with open(file_path, 'r') as f:
+            code = f.read()
+        
+        return self._analyze_code(code)
+    
+    def _analyze_code(self, code: str) -> CodeReview:
+        """Analyze code and generate comprehensive review."""
+        issues = []
+        suggestions = []
+        quality_score = 10.0  # Start with perfect score
 
-    def analyze_file(self, filepath: Path) -> tuple[CodeMetrics, list[ReviewSuggestion]]:
-        """Analyze a Python source file and return metrics and suggestions."""
-        with open(filepath) as f:
-            content = f.read()
-        
-        tree = ast.parse(content)
-        
-        # Calculate metrics
-        self.metrics = self._calculate_metrics(content, tree)
-        
-        # Generate suggestions
-        self.suggestions = []
-        self._analyze_complexity(tree)
-        self._analyze_naming(tree)
-        self._analyze_documentation(tree)
-        
-        return self.metrics, self.suggestions
+        # Analyze code structure
+        lines = code.split('\n')
+        if len(lines) > 500:
+            issues.append({
+                'type': 'complexity',
+                'message': 'File exceeds recommended length of 500 lines'
+            })
+            quality_score -= 1.0
 
-    def _calculate_metrics(self, content: str, tree: ast.AST) -> CodeMetrics:
-        lines = content.splitlines()
-        comment_lines = sum(1 for line in lines if line.strip().startswith('#'))
-        
-        function_nodes = [node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)]
-        class_nodes = [node for node in ast.walk(tree) if isinstance(node, ast.ClassDef)]
-        
-        # Simple complexity = number of branches and loops
-        complexity = len([node for node in ast.walk(tree)
-                         if isinstance(node, (ast.If, ast.For, ast.While))])
-        
-        # Basic maintainability index calculation
-        maintainability = 100 - (complexity * 0.5 + len(lines) * 0.1)
-        
-        return CodeMetrics(
-            complexity=complexity,
-            lines_of_code=len(lines),
-            comment_ratio=comment_lines / len(lines) if lines else 0,
-            function_count=len(function_nodes),
-            class_count=len(class_nodes),
-            maintainability_index=maintainability
+        # Check for security issues
+        for pattern in self.review_patterns['security']:
+            if pattern in code:
+                issues.append({
+                    'type': 'security',
+                    'message': f'Potentially unsafe pattern found: {pattern}'
+                })
+                quality_score -= 2.0
+
+        # Check code style
+        for pattern in self.review_patterns['style']:
+            if pattern in code:
+                issues.append({
+                    'type': 'style',
+                    'message': 'Inconsistent indentation detected'
+                })
+                quality_score -= 0.5
+
+        # Generate improvement suggestions
+        if len(issues) > 0:
+            suggestions.append('Consider breaking down large files into smaller modules')
+            suggestions.append('Implement input validation for potentially unsafe operations')
+            suggestions.append('Follow PEP 8 style guidelines for consistent formatting')
+
+        # Ensure quality score stays within bounds
+        quality_score = max(0.0, min(10.0, quality_score))
+
+        # Generate summary
+        summary = f'Code Review Summary:\n'
+        summary += f'- Found {len(issues)} potential issues\n'
+        summary += f'- Quality Score: {quality_score}/10\n'
+        summary += f'- {len(suggestions)} improvement suggestions provided'
+
+        return CodeReview(
+            summary=summary,
+            issues=issues,
+            suggestions=suggestions,
+            code_quality_score=quality_score
         )
 
-    def _analyze_complexity(self, tree: ast.AST) -> None:
-        for node in ast.walk(tree):
-            if isinstance(node, ast.FunctionDef):
-                complexity = len([n for n in ast.walk(node)
-                                if isinstance(n, (ast.If, ast.For, ast.While))])
-                if complexity > 5:
-                    self.suggestions.append(ReviewSuggestion(
-                        line_number=node.lineno,
-                        severity='warning',
-                        message=f'Function {node.name} has high cyclomatic complexity of {complexity}',
-                        suggestion='Consider breaking down this function into smaller, more focused functions'
-                    ))
+    def batch_review(self, file_paths: List[str]) -> Dict[str, CodeReview]:
+        """Perform code review on multiple files."""
+        reviews = {}
+        for file_path in file_paths:
+            try:
+                reviews[file_path] = self.review_file(file_path)
+            except Exception as e:
+                print(f'Error reviewing {file_path}: {str(e)}')
+        return reviews
 
-    def _analyze_naming(self, tree: ast.AST) -> None:
-        for node in ast.walk(tree):
-            if isinstance(node, (ast.FunctionDef, ast.ClassDef)):
-                if not node.name.islower() and isinstance(node, ast.FunctionDef):
-                    self.suggestions.append(ReviewSuggestion(
-                        line_number=node.lineno,
-                        severity='style',
-                        message=f'Function {node.name} does not follow snake_case naming convention',
-                        suggestion=f'Rename to {node.name.lower()}'
-                    ))
-                elif not node.name[0].isupper() and isinstance(node, ast.ClassDef):
-                    self.suggestions.append(ReviewSuggestion(
-                        line_number=node.lineno,
-                        severity='style',
-                        message=f'Class {node.name} does not follow PascalCase naming convention',
-                        suggestion=f'Rename to {node.name.capitalize()}'
-                    ))
+def main():
+    reviewer = AICodeReviewer()
+    review = reviewer.review_file('example.py')
+    print(review.summary)
+    for issue in review.issues:
+        print(f'Issue: {issue["type"]} - {issue["message"]}')
 
-    def _analyze_documentation(self, tree: ast.AST) -> None:
-        for node in ast.walk(tree):
-            if isinstance(node, (ast.FunctionDef, ast.ClassDef)):
-                if not ast.get_docstring(node):
-                    self.suggestions.append(ReviewSuggestion(
-                        line_number=node.lineno,
-                        severity='documentation',
-                        message=f'Missing docstring for {node.name}',
-                        suggestion='Add a descriptive docstring explaining purpose and parameters'
-                    ))
-
-def review_code(filepath: str) -> str:
-    """Main entry point for code review."""
-    reviewer = CodeReviewer()
-    metrics, suggestions = reviewer.analyze_file(Path(filepath))
-    
-    report = [
-        'Code Review Report',
-        '=================\n',
-        'Metrics:',
-        f'- Lines of code: {metrics.lines_of_code}',
-        f'- Cyclomatic complexity: {metrics.complexity}',
-        f'- Comment ratio: {metrics.comment_ratio:.2%}',
-        f'- Function count: {metrics.function_count}',
-        f'- Class count: {metrics.class_count}',
-        f'- Maintainability index: {metrics.maintainability_index:.1f}/100\n',
-        'Suggestions:'
-    ]
-    
-    for suggestion in suggestions:
-        report.append(f'Line {suggestion.line_number} [{suggestion.severity}]: {suggestion.message}')
-        report.append(f'  → {suggestion.suggestion}\n')
-    
-    return '\n'.join(report)
+if __name__ == '__main__':
+    main()
