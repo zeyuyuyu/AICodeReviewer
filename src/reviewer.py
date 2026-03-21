@@ -1,104 +1,105 @@
 import os
-from typing import List, Dict
-from dataclasses import dataclass
-
-@dataclass
-class CodeReview:
-    summary: str
-    issues: List[Dict]
-    suggestions: List[str]
-    code_quality_score: float
+import openai
+from typing import Dict, List, Optional
 
 class AICodeReviewer:
-    def __init__(self, model_name: str = 'gpt-4'):
-        self.model_name = model_name
-        self.review_patterns = {
-            'security': ['eval(', 'exec(', 'os.system('],
-            'performance': ['O(n^2)', '.*while True.*'],
-            'style': ['\t', '  +']
-        }
-    
-    def review_file(self, file_path: str) -> CodeReview:
-        """Perform an AI-powered code review on a single file."""
-        if not os.path.exists(file_path):
-            raise FileNotFoundError(f'File not found: {file_path}')
+    def __init__(self, api_key: Optional[str] = None):
+        self.api_key = api_key or os.getenv('OPENAI_API_KEY')
+        if not self.api_key:
+            raise ValueError('OpenAI API key must be provided or set in OPENAI_API_KEY env var')
+        openai.api_key = self.api_key
 
-        with open(file_path, 'r') as f:
-            code = f.read()
+    def review_changes(self, diff: str) -> Dict[str, List[str]]:
+        """Review code changes and provide feedback."""
+        prompt = f"""As an expert code reviewer, analyze this diff and provide:
+        1. Key improvements needed
+        2. Potential bugs or security issues
+        3. Style/best practice violations
         
-        return self._analyze_code(code)
-    
-    def _analyze_code(self, code: str) -> CodeReview:
-        """Analyze code and generate comprehensive review."""
-        issues = []
-        suggestions = []
-        quality_score = 10.0  # Start with perfect score
+        Code diff:
+        {diff}
+        """
 
-        # Analyze code structure
-        lines = code.split('\n')
-        if len(lines) > 500:
-            issues.append({
-                'type': 'complexity',
-                'message': 'File exceeds recommended length of 500 lines'
-            })
-            quality_score -= 1.0
-
-        # Check for security issues
-        for pattern in self.review_patterns['security']:
-            if pattern in code:
-                issues.append({
-                    'type': 'security',
-                    'message': f'Potentially unsafe pattern found: {pattern}'
-                })
-                quality_score -= 2.0
-
-        # Check code style
-        for pattern in self.review_patterns['style']:
-            if pattern in code:
-                issues.append({
-                    'type': 'style',
-                    'message': 'Inconsistent indentation detected'
-                })
-                quality_score -= 0.5
-
-        # Generate improvement suggestions
-        if len(issues) > 0:
-            suggestions.append('Consider breaking down large files into smaller modules')
-            suggestions.append('Implement input validation for potentially unsafe operations')
-            suggestions.append('Follow PEP 8 style guidelines for consistent formatting')
-
-        # Ensure quality score stays within bounds
-        quality_score = max(0.0, min(10.0, quality_score))
-
-        # Generate summary
-        summary = f'Code Review Summary:\n'
-        summary += f'- Found {len(issues)} potential issues\n'
-        summary += f'- Quality Score: {quality_score}/10\n'
-        summary += f'- {len(suggestions)} improvement suggestions provided'
-
-        return CodeReview(
-            summary=summary,
-            issues=issues,
-            suggestions=suggestions,
-            code_quality_score=quality_score
+        response = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "You are an expert code reviewer focused on code quality, security and best practices."},
+                {"role": "user", "content": prompt}
+            ]
         )
 
-    def batch_review(self, file_paths: List[str]) -> Dict[str, CodeReview]:
-        """Perform code review on multiple files."""
-        reviews = {}
-        for file_path in file_paths:
-            try:
-                reviews[file_path] = self.review_file(file_path)
-            except Exception as e:
-                print(f'Error reviewing {file_path}: {str(e)}')
-        return reviews
+        # Parse response into structured feedback
+        feedback = self._parse_review_feedback(response.choices[0].message.content)
+        return feedback
 
-def main():
-    reviewer = AICodeReviewer()
-    review = reviewer.review_file('example.py')
-    print(review.summary)
-    for issue in review.issues:
-        print(f'Issue: {issue["type"]} - {issue["message"]}')
+    def generate_pr_summary(self, title: str, description: str, diff: str) -> str:
+        """Generate a comprehensive PR summary with key changes and impact."""
+        prompt = f"""Generate a clear, professional PR summary based on:
 
-if __name__ == '__main__':
-    main()
+Title: {title}
+Description: {description}
+
+Code changes:
+{diff}
+
+Include:
+1. Overview of changes
+2. Technical impact
+3. Testing considerations
+"""
+
+        response = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "You are a technical writer creating clear PR summaries."},
+                {"role": "user", "content": prompt}
+            ]
+        )
+
+        return response.choices[0].message.content
+
+    def _parse_review_feedback(self, raw_feedback: str) -> Dict[str, List[str]]:
+        """Parse raw feedback into structured categories."""
+        categories = {
+            'improvements': [],
+            'bugs': [],
+            'style': []
+        }
+        
+        current_category = None
+        for line in raw_feedback.split('\n'):
+            line = line.strip()
+            if not line:
+                continue
+                
+            if 'improvements' in line.lower():
+                current_category = 'improvements'
+            elif 'bugs' in line.lower() or 'security' in line.lower():
+                current_category = 'bugs'
+            elif 'style' in line.lower() or 'best practice' in line.lower():
+                current_category = 'style'
+            elif current_category and line.startswith('-'):
+                categories[current_category].append(line.lstrip('- '))
+
+        return categories
+
+    def suggest_fixes(self, issue: str, code_context: str) -> str:
+        """Suggest specific code fixes for identified issues."""
+        prompt = f"""Provide specific code fixes for this issue:
+        
+Issue: {issue}
+
+Code context:
+{code_context}
+
+Provide practical, production-ready code suggestions."""
+
+        response = openai.ChatCompletion.create(
+            model="gpt-4", 
+            messages=[
+                {"role": "system", "content": "You are an expert programmer providing specific code fixes."},
+                {"role": "user", "content": prompt}
+            ]
+        )
+
+        return response.choices[0].message.content
