@@ -3,107 +3,102 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Code Reviewer - Level Up Your Code!</title>
+    <title>AI Code Reviewer - Level Up Your Code! 🚀</title>
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css">
 </head>
 <body class="bg-gray-900 text-white">
     <div class="container mx-auto px-4 py-8">
-        <!-- Gamification Header -->
         <div class="flex justify-between items-center mb-8">
+            <h1 class="text-4xl font-bold bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">AI Code Reviewer</h1>
             <div class="flex items-center space-x-4">
                 <div class="relative">
-                    <img src="https://api.dicebear.com/6.x/avataaars/svg?seed=user123" class="w-12 h-12 rounded-full border-2 border-yellow-400">
-                    <span class="absolute -top-1 -right-1 bg-green-500 rounded-full w-4 h-4"></span>
+                    <span class="absolute -top-1 -right-1 bg-red-500 rounded-full w-5 h-5 flex items-center justify-center text-xs animate__animated animate__pulse animate__infinite">3</span>
+                    <img src="https://avatars.githubusercontent.com/u/1234567" class="w-10 h-10 rounded-full border-2 border-purple-500">
                 </div>
-                <div>
-                    <h3 class="text-xl font-bold">Level 12 Code Master</h3>
-                    <div class="flex items-center">
-                        <div class="w-48 h-2 bg-gray-700 rounded-full">
-                            <div class="w-3/4 h-2 bg-blue-500 rounded-full animate__animated animate__pulse animate__infinite"></div>
-                        </div>
-                        <span class="ml-2 text-sm">750/1000 XP</span>
+                <div class="text-right">
+                    <p class="text-xl font-bold">Level 7</p>
+                    <div class="w-32 h-2 bg-gray-700 rounded-full">
+                        <div class="w-3/4 h-2 bg-purple-500 rounded-full"></div>
                     </div>
-                </div>
-            </div>
-            <div class="flex items-center space-x-4">
-                <div class="text-center">
-                    <span class="text-yellow-400 text-2xl font-bold">🔥 23</span>
-                    <p class="text-xs">Day Streak</p>
-                </div>
-                <div class="text-center">
-                    <span class="text-purple-400 text-2xl font-bold">⭐ 145</span>
-                    <p class="text-xs">Karma Points</p>
                 </div>
             </div>
         </div>
 
-        <!-- Main Review Area -->
-        <div class="bg-gray-800 rounded-lg p-6 mb-8">
-            <textarea id="code-input" class="w-full h-64 bg-gray-700 rounded p-4 mb-4 font-mono" placeholder="Paste your code here..."></textarea>
+        <div class="grid md:grid-cols-2 gap-8 mb-8">
+            <div class="bg-gray-800 p-6 rounded-xl">
+                <h2 class="text-2xl font-bold mb-4">Your Coding Streak: 🔥 12 Days</h2>
+                <div class="flex space-x-2 mb-4">
+                    <div class="w-8 h-8 rounded-full bg-purple-500 flex items-center justify-center">✓</div>
+                    <div class="w-8 h-8 rounded-full bg-purple-500 flex items-center justify-center">✓</div>
+                    <div class="w-8 h-8 rounded-full bg-purple-500 flex items-center justify-center">✓</div>
+                    <div class="w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center">?</div>
+                    <div class="w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center">?</div>
+                </div>
+                <p class="text-gray-400">Keep your streak alive! Review code daily to earn bonus points!</p>
+            </div>
+
+            <div class="bg-gray-800 p-6 rounded-xl">
+                <h2 class="text-2xl font-bold mb-4">Achievements 🏆</h2>
+                <div class="grid grid-cols-4 gap-4">
+                    <div class="achievement-badge" title="Clean Code Master">
+                        <img src="badge1.png" class="w-12 h-12 mx-auto mb-2">
+                        <span class="text-xs text-center block">Clean Code Master</span>
+                    </div>
+                    <div class="achievement-badge opacity-50" title="Bug Hunter">
+                        <img src="badge2.png" class="w-12 h-12 mx-auto mb-2">
+                        <span class="text-xs text-center block">Bug Hunter</span>
+                    </div>
+                    <!-- More badges -->
+                </div>
+            </div>
+        </div>
+
+        <div class="bg-gray-800 p-6 rounded-xl mb-8">
+            <textarea class="w-full h-64 bg-gray-900 p-4 rounded-lg mb-4 font-mono" placeholder="Paste your code here..."></textarea>
             <div class="flex justify-between items-center">
-                <button onclick="reviewCode()" class="bg-blue-600 hover:bg-blue-700 px-6 py-3 rounded-lg font-bold animate__animated animate__pulse animate__infinite">Review My Code 🚀</button>
-                <span class="text-gray-400">Earn 50 XP per review!</span>
+                <button class="bg-purple-500 hover:bg-purple-600 px-8 py-3 rounded-lg font-bold transition-all transform hover:scale-105">
+                    Review My Code 🚀
+                </button>
+                <div class="flex space-x-4">
+                    <button class="bg-blue-500 hover:bg-blue-600 px-4 py-2 rounded-lg font-bold">
+                        Share Results 📤
+                    </button>
+                    <button class="bg-green-500 hover:bg-green-600 px-4 py-2 rounded-lg font-bold">
+                        Challenge Friends 🤝
+                    </button>
+                </div>
             </div>
         </div>
 
-        <!-- Social Feed -->
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div class="bg-gray-800 rounded-lg p-6">
-                <h3 class="text-xl font-bold mb-4">🏆 Leaderboard</h3>
-                <div class="space-y-4">
-                    <div class="flex items-center justify-between bg-gray-700 p-3 rounded">
-                        <div class="flex items-center space-x-3">
-                            <span class="text-yellow-400 font-bold">1</span>
-                            <img src="https://api.dicebear.com/6.x/avataaars/svg?seed=top1" class="w-8 h-8 rounded-full">
-                            <span>CodeNinja</span>
-                        </div>
-                        <span class="text-blue-400">2,450 XP</span>
+        <div class="bg-gray-800 p-6 rounded-xl">
+            <h2 class="text-2xl font-bold mb-4">Global Leaderboard 🌎</h2>
+            <div class="space-y-4">
+                <div class="flex items-center justify-between bg-gray-700 p-4 rounded-lg">
+                    <div class="flex items-center space-x-4">
+                        <span class="text-2xl font-bold text-yellow-500">1</span>
+                        <img src="user1.jpg" class="w-10 h-10 rounded-full">
+                        <span class="font-bold">CodeNinja</span>
                     </div>
-                    <!-- More leaderboard entries... -->
+                    <span class="text-purple-400">12,450 pts</span>
                 </div>
-            </div>
-            <div class="bg-gray-800 rounded-lg p-6">
-                <h3 class="text-xl font-bold mb-4">🎯 Achievements</h3>
-                <div class="grid grid-cols-3 gap-4">
-                    <div class="text-center">
-                        <div class="w-16 h-16 mx-auto bg-purple-700 rounded-full flex items-center justify-center mb-2">
-                            <span class="text-2xl">🎯</span>
-                        </div>
-                        <p class="text-sm">First Review</p>
-                    </div>
-                    <div class="text-center opacity-50">
-                        <div class="w-16 h-16 mx-auto bg-gray-700 rounded-full flex items-center justify-center mb-2">
-                            <span class="text-2xl">⚡</span>
-                        </div>
-                        <p class="text-sm">10 Day Streak</p>
-                    </div>
-                    <!-- More achievements... -->
-                </div>
+                <!-- More leaderboard entries -->
             </div>
         </div>
     </div>
 
-    <!-- Social Sharing Modal -->
-    <div id="share-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
-        <div class="bg-gray-800 rounded-lg p-6 w-96">
-            <h3 class="text-xl font-bold mb-4">🎉 Share Your Achievement!</h3>
-            <p class="mb-4">Just earned 50 XP and unlocked "Code Guru" badge!</p>
-            <div class="flex space-x-4">
-                <button class="flex-1 bg-blue-500 hover:bg-blue-600 py-2 rounded">Twitter</button>
-                <button class="flex-1 bg-green-500 hover:bg-green-600 py-2 rounded">LinkedIn</button>
-            </div>
-        </div>
+    <div class="fixed bottom-4 right-4 animate__animated animate__bounceIn">
+        <button class="bg-yellow-500 hover:bg-yellow-600 px-6 py-3 rounded-full font-bold shadow-lg transform hover:scale-105 transition-all">
+            Daily Challenge! 🎯
+        </button>
     </div>
 
     <script>
-        function reviewCode() {
-            // Simulate review process
-            setTimeout(() => {
-                // Show achievement unlock animation
-                document.getElementById('share-modal').classList.remove('hidden');
-            }, 1500);
-        }
+        // Add confetti effect when streaks/achievements are earned
+        // Add social sharing functionality
+        // Add realtime notifications for friend activity
+        // Add daily challenge system
+        // Add points/XP system
     </script>
 </body>
 </html>
